@@ -2,25 +2,28 @@ import numpy as np  # linear algebra
 import pandas as pd  # data processing, CSV file I/O (e.g. pd.read_csv)
 import sys
 import os
+import matplotlib.pyplot as plt
 from keras.layers import *
 from keras.optimizers import *
 from keras.applications import *
 from keras.models import Model
 from keras.preprocessing.image import ImageDataGenerator
 from keras.callbacks import ModelCheckpoint, EarlyStopping
-from keras import backend as k
+from keras import backend as k, models
+from sklearn import metrics
 
 # hyper parameters for model
+from tensorflow.python.ops.confusion_matrix import confusion_matrix
+
 nb_classes = 260  # number of classes
 based_model_last_block_layer_number = 126  # value is based on based model selected.
 img_width, img_height = 256, 256  # change based on the shape/structure of your images
 batch_size = 32  # try 4, 8, 16, 32, 64, 128, 256 dependent on CPU/GPU memory capacity (powers of 2 values).
-nb_epoch = 10  # number of iteration the algorithm gets trained.
+nb_epoch = 5  # number of iteration the algorithm gets trained.
 transformation_ratio = .05  # how aggressive will be the data augmentation/transformation
 
 
-def train(train_data_dir, validation_data_dir, model_path):
-    # Pre-Trained CNN Model using imagenet dataset for pre-trained weights
+def create_model():
     base_model = Xception(input_shape=(img_width, img_height, 3), weights='imagenet', include_top=False)
 
     # Top Model Block
@@ -28,19 +31,25 @@ def train(train_data_dir, validation_data_dir, model_path):
     x = GlobalAveragePooling2D()(x)
     predictions = Dense(nb_classes, activation='softmax')(x)
 
+    # first: train only the top layers (which were randomly initialized)
+    # i.e. freeze all layers of the based model that is already pre-trained.
+    for layer in base_model.layers:
+        layer.trainable = False
+
     # add your top layer block to your base model
-    model = Model(base_model.input, predictions)
-    print(model.summary())
+    return Model(base_model.input, predictions)
+
+
+def train(train_data_dir, validation_data_dir, model_path):
+    # Pre-Trained CNN Model using imagenet dataset for pre-trained weights
+    model = create_model()
 
     # # let's visualize layer names and layer indices to see how many layers/blocks to re-train
     # # uncomment when choosing based_model_last_block_layer
     # for i, layer in enumerate(model.layers):
     #     print(i, layer.name)
 
-    # first: train only the top layers (which were randomly initialized)
-    # i.e. freeze all layers of the based model that is already pre-trained.
-    for layer in base_model.layers:
-        layer.trainable = False
+
 
     # Read Data and Augment it: Make sure to select augmentations that are appropriate to your images.
     # To save augmentations un-comment save lines and add to your flow parameters.
@@ -83,10 +92,10 @@ def train(train_data_dir, validation_data_dir, model_path):
 
     # Train Simple CNN
     model.fit_generator(train_generator,
-                        steps_per_epoch=train_generator.n//train_generator.batch_size,
+                        steps_per_epoch=train_generator.n // train_generator.batch_size,
                         epochs=nb_epoch,
                         validation_data=validation_generator,
-                        validation_steps=validation_generator.n//validation_generator.batch_size,
+                        validation_steps=validation_generator.n // validation_generator.batch_size,
                         callbacks=callbacks_list)
 
     # verbose
@@ -122,10 +131,10 @@ def train(train_data_dir, validation_data_dir, model_path):
 
     # fine-tune the model
     model.fit_generator(train_generator,
-                        steps_per_epoch=train_generator.nb_sample,
+                        steps_per_epoch=train_generator.n // train_generator.batch_size,
                         epochs=nb_epoch,
                         validation_data=validation_generator,
-                        validation_steps=validation_generator.nb_sample,
+                        validation_steps=validation_generator.n // validation_generator.batch_size,
                         callbacks=callbacks_list)
 
     # save model
@@ -134,14 +143,45 @@ def train(train_data_dir, validation_data_dir, model_path):
         json_file.write(model_json)
 
 
+def predict(test_dir, model_path):
+    prediction_model = create_model()
+    final_weights_path = os.path.join(os.path.abspath(model_path), 'model_weights.h5')
+    prediction_model.load_weights(final_weights_path)
+    prediction_model.compile(optimizer='nadam',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    test_datagen = ImageDataGenerator(rescale=1. / 255)
+    test_generator = test_datagen.flow_from_directory(test_dir,
+                                                        target_size=(img_width, img_height),
+                                                        batch_size=1,
+                                                        shuffle=False,
+                                                        class_mode='categorical')
+    y_pred = prediction_model.predict(x=test_generator)
+    print(test_generator.classes)
+    print(y_pred.argmax(axis=1))
+    cm = metrics.confusion_matrix(test_generator.labels, y_pred.argmax(axis=1))
+    plt.imshow(cm, cmap=plt.cm.Blues)
+    plt.xlabel("Predicted labels")
+    plt.ylabel("True labels")
+    plt.xticks([], [])
+    plt.yticks([], [])
+    plt.title('Confusion matrix ')
+    plt.colorbar()
+    plt.show()
+    [test_loss, test_accuracy] = prediction_model.evaluate(x=test_generator)
+
+
 if __name__ == '__main__':
     input_dir = r'./data'
 
     train_dir = os.path.join(os.path.abspath(input_dir), 'train')  # Inside, each class should have it's own folder
     validation_dir = os.path.join(os.path.abspath(input_dir), 'valid')  # each class should have it's own folder
+    test_dir = os.path.join(os.path.abspath(input_dir), 'test')
     model_dir = os.path.join(os.path.abspath(input_dir), 'weights')
 
-    train(train_dir, validation_dir, model_dir)  # train model
+    #train(train_dir, validation_dir, model_dir)  # train model
+
+    predict(test_dir, model_dir)
 
     # release memory
     k.clear_session()

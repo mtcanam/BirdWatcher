@@ -8,6 +8,7 @@ The basic criteria that need to be satisfied are:
   <li>Run the image through pre-trained ConvNet model to determine bird species;</li>  
   <li>Push notification to something (undetermined, either app or just email/text) with picture of bird and identification;</li>
   <li>Analyze bird sounds to determine bird species (stretch);</li>
+  <li>Database to store birds spotted per day (species, count, accuracy, etc.);</li>
 </ul>
 <b>Hardware</b>
 <ul>
